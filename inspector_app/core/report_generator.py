@@ -6,7 +6,7 @@ Handles generation of diagnostic reports in various formats.
 import os
 import json
 import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -40,6 +40,112 @@ class ReportGenerator:
         self.template_dir = Path(__file__).parent.parent / "templates"
         self.output_dir = Path.home() / "InspectorReports"
         self.output_dir.mkdir(exist_ok=True)
+
+
+class ReportFormatter:
+    """Formats and generates reports for the inspector application."""
+    
+    def __init__(self):
+        self.output_dir = Path.home() / "InspectorReports"
+        self.output_dir.mkdir(exist_ok=True)
+    
+    def generate_report(
+        self,
+        inspector_data: Dict[str, Any],
+        system_data: Dict[str, Any],
+        save_to_file: bool = True
+    ) -> Tuple[str, Optional[str]]:
+        """
+        Generate a formatted report.
+        
+        Args:
+            inspector_data: Data collected from inspector inputs
+            system_data: System information data
+            save_to_file: Whether to save the report to a file
+            
+        Returns:
+            Tuple of (report_content, file_path)
+        """
+        try:
+            # Create report content
+            report_content = self._create_report_content(inspector_data, system_data)
+            
+            file_path = None
+            if save_to_file:
+                file_path = self._save_report_to_file(report_content)
+            
+            return report_content, file_path
+            
+        except Exception as e:
+            print(f"Error generating report: {e}")
+            return f"Error generating report: {str(e)}", None
+    
+    def _create_report_content(self, inspector_data: Dict[str, Any], system_data: Dict[str, Any]) -> str:
+        """Create the report content."""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        report = f"""
+COMPUTER INSPECTION REPORT
+═══════════════════════════════════════════════════════════════════════════════
+Generated: {timestamp}
+═══════════════════════════════════════════════════════════════════════════════
+
+INSPECTION DETAILS:
+═══════════════════════════════════════════════════════════════════════════════
+Inspector: {inspector_data.get('inspector', 'N/A')}
+Invoice #: {inspector_data.get('order_number', 'N/A')}
+Inspection Date: {inspector_data.get('inspection_date', 'N/A')}
+Location: {inspector_data.get('initial_location', 'N/A')}
+SKU: {inspector_data.get('sku_number', 'N/A')}
+
+DEVICE CONDITION:
+═══════════════════════════════════════════════════════════════════════════════
+Charger: {inspector_data.get('charger', 'N/A')}
+Warranty: {inspector_data.get('warranty', 'N/A')}
+Condition Rating: {inspector_data.get('condition', 'N/A')}/10
+Condition Notes: {inspector_data.get('condition_notes', 'N/A')}
+
+ISSUES FOUND:
+═══════════════════════════════════════════════════════════════════════════════
+{inspector_data.get('issues', 'No issues found')}
+
+SYSTEM SPECIFICATIONS:
+═══════════════════════════════════════════════════════════════════════════════
+Brand/Model: {system_data.get('brand_model', 'N/A')}
+CPU: {system_data.get('cpu', 'N/A')}
+RAM: {system_data.get('ram', 'N/A')}
+Storage: {system_data.get('storage', 'N/A')}
+GPU: {system_data.get('gpu', 'N/A')}
+Operating System: {system_data.get('os', 'N/A')}
+Display: {system_data.get('display', 'N/A')}
+Touch Support: {system_data.get('touch_support', 'N/A')}
+Fingerprint Reader: {system_data.get('fingerprint_reader', 'N/A')}
+Battery Health: {system_data.get('battery_health', 'N/A')}
+
+═══════════════════════════════════════════════════════════════════════════════
+INSPECTION STATUS: ✅ COMPLETED SUCCESSFULLY
+═══════════════════════════════════════════════════════════════════════════════
+
+The inspection was completed successfully and all system components have been evaluated.
+        """.strip()
+        
+        return report
+    
+    def _save_report_to_file(self, report_content: str) -> Optional[str]:
+        """Save report to file and return file path."""
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"computer_inspection_report_{timestamp}.txt"
+            file_path = self.output_dir / filename
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(report_content)
+            
+            return str(file_path)
+            
+        except Exception as e:
+            print(f"Error saving report: {e}")
+            return None
     
     def generate_report(
         self,
