@@ -6,9 +6,16 @@ Provides comprehensive system information gathering capabilities.
 import platform
 import psutil
 import subprocess
-import GPUtil
 import screeninfo
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+
+# Try to import GPUtil, but handle import errors gracefully
+try:
+    import GPUtil
+    GPUTIL_AVAILABLE = True
+except ImportError:
+    GPUTIL_AVAILABLE = False
+    print("Warning: GPUtil not available, GPU detection will be limited")
 
 
 class SystemInfoCollector:
@@ -204,15 +211,19 @@ class SystemInfoCollector:
                     if gpu_names:
                         return ", ".join(gpu_names)
             
-            # Fallback to GPUtil
-            gpus = GPUtil.getGPUs()
-            if gpus:
-                gpu_names = []
-                for gpu in gpus:
-                    if gpu.name:
-                        gpu_names.append(gpu.name)
-                if gpu_names:
-                    return ", ".join(gpu_names)
+            # Fallback to GPUtil if available
+            if GPUTIL_AVAILABLE:
+                try:
+                    gpus = GPUtil.getGPUs()
+                    if gpus:
+                        gpu_names = []
+                        for gpu in gpus:
+                            if gpu.name:
+                                gpu_names.append(gpu.name)
+                        if gpu_names:
+                            return ", ".join(gpu_names)
+                except Exception:
+                    pass
             
             # Final fallback
             return "Integrated Graphics"
@@ -414,6 +425,227 @@ class SystemInfoCollector:
         
         # If no match found, return the original manufacturer
         return manufacturer
+    
+    def get_basic_system_info(self) -> Dict[str, Any]:
+        """Get basic system information for testing."""
+        try:
+            return {
+                'os_name': platform.system(),
+                'os_version': platform.version(),
+                'cpu_usage_percent': psutil.cpu_percent(interval=1),
+                'logical_cores': psutil.cpu_count(logical=True),
+                'error': None
+            }
+        except Exception as e:
+            return {
+                'os_name': 'Unknown',
+                'os_version': 'Unknown',
+                'cpu_usage_percent': 0,
+                'logical_cores': 0,
+                'error': str(e)
+            }
+    
+    def get_comprehensive_system_info(self) -> Dict[str, Any]:
+        """Get comprehensive system information for reports."""
+        try:
+            # Get basic system info
+            basic_info = self.get_basic_system_info()
+            
+            # Get memory info
+            memory = psutil.virtual_memory()
+            memory_info = {
+                'percent': memory.percent,
+                'formatted_total': f"{memory.total / (1024**3):.1f} GB"
+            }
+            
+            # Get disk info
+            disk_info = []
+            for partition in psutil.disk_partitions():
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    disk_info.append({
+                        'device': partition.device,
+                        'mountpoint': partition.mountpoint,
+                        'percent': usage.percent,
+                        'total': usage.total,
+                        'used': usage.used,
+                        'free': usage.free
+                    })
+                except (PermissionError, FileNotFoundError):
+                    continue
+            
+            # Get network info
+            network_info = {
+                'interfaces': {},
+                'connections': []
+            }
+            
+            # Get network interfaces
+            net_if_addrs = psutil.net_if_addrs()
+            for interface, addrs in net_if_addrs.items():
+                network_info['interfaces'][interface] = []
+                for addr in addrs:
+                    network_info['interfaces'][interface].append({
+                        'family': str(addr.family),
+                        'address': addr.address,
+                        'netmask': addr.netmask
+                    })
+            
+            # Get network connections
+            try:
+                connections = psutil.net_connections()
+                for conn in connections[:10]:  # Limit to first 10 connections
+                    if conn.status == 'ESTABLISHED':
+                        network_info['connections'].append({
+                            'local_address': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "N/A",
+                            'remote_address': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "N/A",
+                            'status': conn.status
+                        })
+            except (PermissionError, psutil.AccessDenied):
+                network_info['error'] = "Access denied to network connections"
+            
+            return {
+                'basic_info': basic_info,
+                'memory_info': memory_info,
+                'disk_info': disk_info,
+                'network_info': network_info,
+                'error': None
+            }
+            
+        except Exception as e:
+            return {
+                'basic_info': {'error': str(e)},
+                'memory_info': {'error': str(e)},
+                'disk_info': [],
+                'network_info': {'error': str(e)},
+                'error': str(e)
+            }
+    
+    def get_cpu_info(self) -> Dict[str, Any]:
+        """Get detailed CPU information."""
+        try:
+            cpu_freq = psutil.cpu_freq()
+            return {
+                'cpu_usage_percent': psutil.cpu_percent(interval=1),
+                'logical_cores': psutil.cpu_count(logical=True),
+                'physical_cores': psutil.cpu_count(logical=False),
+                'current_frequency': cpu_freq.current if cpu_freq else None,
+                'min_frequency': cpu_freq.min if cpu_freq else None,
+                'max_frequency': cpu_freq.max if cpu_freq else None,
+                'error': None
+            }
+        except Exception as e:
+            return {
+                'cpu_usage_percent': 0,
+                'logical_cores': 0,
+                'physical_cores': 0,
+                'current_frequency': None,
+                'min_frequency': None,
+                'max_frequency': None,
+                'error': str(e)
+            }
+    
+    def get_memory_info(self) -> Dict[str, Any]:
+        """Get detailed memory information."""
+        try:
+            memory = psutil.virtual_memory()
+            return {
+                'total': memory.total,
+                'available': memory.available,
+                'used': memory.used,
+                'free': memory.free,
+                'percent': memory.percent,
+                'formatted_total': f"{memory.total / (1024**3):.1f} GB",
+                'formatted_available': f"{memory.available / (1024**3):.1f} GB",
+                'formatted_used': f"{memory.used / (1024**3):.1f} GB",
+                'error': None
+            }
+        except Exception as e:
+            return {
+                'total': 0,
+                'available': 0,
+                'used': 0,
+                'free': 0,
+                'percent': 0,
+                'formatted_total': '0 GB',
+                'formatted_available': '0 GB',
+                'formatted_used': '0 GB',
+                'error': str(e)
+            }
+    
+    def get_disk_info(self) -> List[Dict[str, Any]]:
+        """Get detailed disk information."""
+        try:
+            disk_info = []
+            for partition in psutil.disk_partitions():
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    disk_info.append({
+                        'device': partition.device,
+                        'mountpoint': partition.mountpoint,
+                        'filesystem': partition.fstype,
+                        'total': usage.total,
+                        'used': usage.used,
+                        'free': usage.free,
+                        'percent': usage.percent,
+                        'formatted_total': f"{usage.total / (1024**3):.1f} GB",
+                        'formatted_used': f"{usage.used / (1024**3):.1f} GB",
+                        'formatted_free': f"{usage.free / (1024**3):.1f} GB",
+                        'error': None
+                    })
+                except (PermissionError, FileNotFoundError):
+                    disk_info.append({
+                        'device': partition.device,
+                        'mountpoint': partition.mountpoint,
+                        'filesystem': partition.fstype,
+                        'error': 'Access denied'
+                    })
+            return disk_info
+        except Exception as e:
+            return [{'error': str(e)}]
+    
+    def get_network_info(self) -> Dict[str, Any]:
+        """Get detailed network information."""
+        try:
+            network_info = {
+                'interfaces': {},
+                'connections': [],
+                'error': None
+            }
+            
+            # Get network interfaces
+            net_if_addrs = psutil.net_if_addrs()
+            for interface, addrs in net_if_addrs.items():
+                network_info['interfaces'][interface] = []
+                for addr in addrs:
+                    network_info['interfaces'][interface].append({
+                        'family': str(addr.family),
+                        'address': addr.address,
+                        'netmask': addr.netmask
+                    })
+            
+            # Get network connections
+            try:
+                connections = psutil.net_connections()
+                for conn in connections[:20]:  # Limit to first 20 connections
+                    if conn.status == 'ESTABLISHED':
+                        network_info['connections'].append({
+                            'local_address': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "N/A",
+                            'remote_address': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "N/A",
+                            'status': conn.status,
+                            'pid': conn.pid
+                        })
+            except (PermissionError, psutil.AccessDenied):
+                network_info['error'] = "Access denied to network connections"
+            
+            return network_info
+            
+        except Exception as e:
+            return {
+                'interfaces': {},
+                'connections': [],
+                'error': str(e)
+            }
 
 
 # Global instance for easy access

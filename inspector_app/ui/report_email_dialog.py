@@ -6,13 +6,13 @@ Provides UI for generating reports and sending emails.
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QTextEdit, QPushButton, QFileDialog, QMessageBox, QProgressBar,
     QGroupBox, QCheckBox, QComboBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
 
 from core.report_generator import ReportFormatter
 from core.email_sender import EmailSender, EmailConfig, EmailStatus

@@ -121,6 +121,37 @@ class EmailSender:
                 error_message=f"Failed to send system report: {str(e)}"
             )
     
+    def send_email(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        attachment_path: Optional[str] = None
+    ) -> EmailResult:
+        """Send a simple email with optional attachment."""
+        try:
+            # Create message
+            msg = MIMEMultipart()
+            msg['From'] = self.config.username
+            msg['To'] = recipient
+            msg['Subject'] = subject
+            
+            # Add body
+            msg.attach(MIMEText(body, 'plain'))
+            
+            # Add attachment if provided
+            if attachment_path and Path(attachment_path).exists():
+                self._add_attachment(msg, attachment_path)
+            
+            # Send email
+            return self._send_email(msg)
+            
+        except Exception as e:
+            return EmailResult(
+                status=EmailStatus.FAILED,
+                error_message=f"Failed to send email: {str(e)}"
+            )
+    
     def _create_report_email_body(self, subject: str, system_summary: Optional[Dict]) -> str:
         """Create email body for system report."""
         body = f"""

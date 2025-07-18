@@ -1,4 +1,4 @@
 PyQt6>=6.4.0
 psutil>=5.9.0
-GPUtil>=1.4.0
-screeninfo>=0.8.1 
+screeninfo>=0.8.1
+# GPUtil>=1.4.0  # Optional - can cause issues with PyInstaller 
