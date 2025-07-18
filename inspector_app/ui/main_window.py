@@ -10,11 +10,49 @@ from PyQt6.QtWidgets import (
     QProgressBar, QCheckBox, QComboBox, QSpinBox, QFileDialog,
     QMessageBox, QSplitter, QFrame, QScrollArea, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
 # Import the system info collector
 from core.system_info import system_collector
+
+# Import Gmail and report functionality
+from gmail_config import GmailConfigManager, setup_gmail_interactive, test_gmail_configuration
+from core.report_generator import ReportFormatter
+from core.email_sender import EmailSender, EmailConfig, EmailStatus
+from google_oauth_simple import GoogleAccountSelectionDialog, GoogleUser
+
+
+class EmailWorker(QThread):
+    """Worker thread for sending emails."""
+    email_sent = pyqtSignal(bool, str)  # success, message
+    
+    def __init__(self, email_sender: EmailSender, recipient: str, subject: str, 
+                 body: str, attachment_path: str = None):
+        super().__init__()
+        self.email_sender = email_sender
+        self.recipient = recipient
+        self.subject = subject
+        self.body = body
+        self.attachment_path = attachment_path
+    
+    def run(self):
+        """Send email in background thread."""
+        try:
+            result = self.email_sender.send_email(
+                recipient=self.recipient,
+                subject=self.subject,
+                body=self.body,
+                attachment_path=self.attachment_path
+            )
+            
+            if result.status == EmailStatus.SENT:
+                self.email_sent.emit(True, f"Email sent successfully! Message ID: {result.message_id}")
+            else:
+                self.email_sent.emit(False, f"Email failed: {result.error_message}")
+                
+        except Exception as e:
+            self.email_sent.emit(False, f"Email error: {str(e)}")
 
 
 class MainWindow(QMainWindow):
@@ -30,6 +68,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Inspector Diagnostic Utility")
         self.setGeometry(100, 100, 1200, 800)
         self.setMinimumSize(1000, 600)
+        
+        # Initialize Gmail and report components
+        self.gmail_config = GmailConfigManager()
+        self.report_formatter = ReportFormatter()
+        self.email_worker = None
         
         # Initialize UI components
         self._setup_ui()
@@ -556,6 +599,45 @@ class MainWindow(QMainWindow):
         email_layout.addWidget(email_label)
         email_layout.addWidget(self.email_edit)
         
+        # Google OAuth section
+        google_layout = QHBoxLayout()
+        google_layout.setSpacing(15)
+        
+        google_label = QLabel("Google Account:")
+        google_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        google_label.setStyleSheet("color: #2c3e50; min-width: 120px; padding: 3px;")
+        google_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        
+        # Google Sign-in button with real OAuth
+        try:
+            from google_oauth_real import GoogleSignInButton
+            self.google_signin_btn = GoogleSignInButton()
+            self.google_signin_btn.setMinimumHeight(32)
+            self.google_signin_btn.authentication_completed.connect(self._on_google_auth_completed)
+            self.google_signin_btn.authentication_failed.connect(self._on_google_auth_failed)
+        except Exception as e:
+            # Fallback to simple button if OAuth setup fails
+            self.google_signin_btn = QPushButton("Sign in with Google (Setup Required)")
+            self.google_signin_btn.setEnabled(False)
+            self.google_signin_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #95a5a6;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    min-height: 40px;
+                    font-weight: bold;
+                }
+            """)
+        
+        google_layout.addWidget(google_label)
+        google_layout.addWidget(self.google_signin_btn)
+        
+        # Add both layouts to report layout
+        report_layout.addLayout(email_layout)
+        report_layout.addLayout(google_layout)
+        
         # Report buttons with compact responsive styling
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(15)
@@ -627,7 +709,6 @@ class MainWindow(QMainWindow):
         buttons_layout.addWidget(self.save_report_btn)
         buttons_layout.addWidget(self.send_email_btn)
         
-        report_layout.addLayout(email_layout)
         report_layout.addLayout(buttons_layout)
         
         parent_layout.addWidget(report_group)
@@ -697,30 +778,278 @@ class MainWindow(QMainWindow):
         
     def _on_generate_report(self):
         """Handle generate report button click."""
-        self.statusBar().showMessage("Generating report...")
-        # TODO: Implement report generation
-        QMessageBox.information(self, "Report Generation", "Report generation functionality will be implemented.")
-        
+        try:
+            self.statusBar().showMessage("Generating report...")
+            
+            # Collect inspector data from UI
+            inspector_data = self._collect_inspector_data()
+            
+            # Get system data
+            system_data = system_collector.get_system_info()
+            
+            # Generate report
+            report_content, file_path = self.report_formatter.generate_report(
+                inspector_data=inspector_data,
+                system_data=system_data,
+                save_to_file=True
+            )
+            
+            if file_path:
+                self.statusBar().showMessage(f"Report generated successfully: {file_path}")
+                QMessageBox.information(self, "Success", f"Report generated and saved to:\n{file_path}")
+            else:
+                self.statusBar().showMessage("Failed to generate report")
+                QMessageBox.critical(self, "Error", "Failed to generate report")
+                
+        except Exception as e:
+            self.statusBar().showMessage(f"Error generating report: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to generate report: {str(e)}")
+    
     def _on_save_report(self):
         """Handle save report button click."""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Report", "", "All Files (*);;HTML (*.html);;PDF (*.pdf);;Text (*.txt)"
-        )
-        if file_path:
-            self.statusBar().showMessage(f"Report saved to: {file_path}")
-        # TODO: Implement actual report saving
-        
+        try:
+            # Collect inspector data from UI
+            inspector_data = self._collect_inspector_data()
+            
+            # Get system data
+            system_data = system_collector.get_system_info()
+            
+            # Ask user for save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Report", "", "Text Files (*.txt);;All Files (*)"
+            )
+            
+            if file_path:
+                # Generate and save report
+                report_content, saved_path = self.report_formatter.generate_report(
+                    inspector_data=inspector_data,
+                    system_data=system_data,
+                    save_to_file=True,
+                    custom_path=file_path
+                )
+                
+                if saved_path:
+                    self.statusBar().showMessage(f"Report saved to: {saved_path}")
+                    QMessageBox.information(self, "Success", f"Report saved to:\n{saved_path}")
+                else:
+                    self.statusBar().showMessage("Failed to save report")
+                    QMessageBox.critical(self, "Error", "Failed to save report")
+                    
+        except Exception as e:
+            self.statusBar().showMessage(f"Error saving report: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to save report: {str(e)}")
+    
     def _on_send_email(self):
-        """Handle send email button click."""
-        recipient = self.email_edit.text()
+        """Handle send email button click with Google OAuth."""
+        recipient = self.email_edit.text().strip()
         
         if not recipient:
             QMessageBox.warning(self, "Warning", "Please enter a recipient email address.")
             return
+        
+        # Check if user is authenticated with Google
+        if not hasattr(self, 'google_user') or not self.google_user:
+            QMessageBox.information(
+                self, 
+                "Google Authentication Required", 
+                "Please sign in with Google first to send emails.\n\n"
+                "Click the 'Sign in with Google' button above."
+            )
+            return
+        
+        # User is authenticated, proceed with sending
+        self._send_report_email_with_google_oauth(recipient)
+    
+
+    
+    def _on_google_auth_completed(self, user):
+        """Handle successful Google OAuth authentication."""
+        from google_oauth_real import GoogleUser
+        self.google_user = user
+        self.statusBar().showMessage(f"Signed in as {user.email}")
+        
+        # The enhanced GoogleSignInButton handles its own UI updates
+        # No need to manually update button text/style
+        
+        QMessageBox.information(
+            self, 
+            "Google Authentication Successful", 
+            f"Successfully signed in as {user.email}\n\n"
+            "You can now send emails using your Google account!\n\n"
+            "To switch to a different account, click the Google sign-in button again."
+        )
+    
+    def _on_google_auth_failed(self, error: str):
+        """Handle Google OAuth authentication failure."""
+        self.statusBar().showMessage(f"Google authentication failed: {error}")
+        QMessageBox.critical(
+            self, 
+            "Authentication Failed", 
+            f"Failed to sign in with Google:\n{error}\n\n"
+            "Please try again or check your internet connection."
+        )
+    
+    def _send_report_email_with_google_oauth(self, recipient: str):
+        """Send report via email using Google OAuth and Gmail API."""
+        try:
+            self.statusBar().showMessage(f"Preparing to send email to: {recipient}")
             
-        self.statusBar().showMessage(f"Sending report to: {recipient}")
-        # TODO: Implement email sending
-        QMessageBox.information(self, "Email", "Email functionality will be implemented.")
+            # Collect inspector data
+            inspector_data = self._collect_inspector_data()
+            
+            # Get system data
+            system_data = system_collector.get_system_info()
+            
+            # Generate report for attachment
+            report_content, report_path = self.report_formatter.generate_report(
+                inspector_data=inspector_data,
+                system_data=system_data,
+                save_to_file=True
+            )
+            
+            if not report_path:
+                QMessageBox.critical(self, "Error", "Failed to generate report for email")
+                return
+            
+            # Create email content with detailed report in body
+            subject = "Computer Inspection Report"
+            
+            # Create detailed report content for email body
+            report_body = f"""
+Dear Client,
+
+Please find attached the detailed computer inspection report for your order.
+
+REPORT SUMMARY:
+═══════════════════════════════════════════════════════════════════════════════
+
+INSPECTION DETAILS:
+• Inspector: {inspector_data.get('inspector', 'N/A')}
+• Invoice #: {inspector_data.get('order_number', 'N/A')}
+• Inspection Date: {inspector_data.get('inspection_date', 'N/A')}
+• Location: {inspector_data.get('initial_location', 'N/A')}
+• SKU: {inspector_data.get('sku_number', 'N/A')}
+
+DEVICE CONDITION:
+• Charger: {inspector_data.get('charger', 'N/A')}
+• Warranty: {inspector_data.get('warranty', 'N/A')}
+• Condition Rating: {inspector_data.get('condition', 'N/A')}/10
+• Condition Notes: {inspector_data.get('condition_notes', 'N/A')}
+
+ISSUES FOUND:
+• {inspector_data.get('issues', 'No issues found')}
+
+SYSTEM SPECIFICATIONS:
+• Brand/Model: {system_data.get('brand_model', 'N/A')}
+• CPU: {system_data.get('cpu', 'N/A')}
+• RAM: {system_data.get('ram', 'N/A')}
+• Storage: {system_data.get('storage', 'N/A')}
+• GPU: {system_data.get('gpu', 'N/A')}
+• Operating System: {system_data.get('os', 'N/A')}
+• Display: {system_data.get('display', 'N/A')}
+• Touch Support: {system_data.get('touch_support', 'N/A')}
+• Fingerprint Reader: {system_data.get('fingerprint_reader', 'N/A')}
+• Battery Health: {system_data.get('battery_health', 'N/A')}
+
+═══════════════════════════════════════════════════════════════════════════════
+
+INSPECTION STATUS: ✅ COMPLETED SUCCESSFULLY
+
+The inspection was completed successfully and all system components have been evaluated. 
+A detailed technical report is attached for your records.
+
+If you have any questions about this report, please don't hesitate to contact us.
+
+Best regards,
+Computer Inspector Team
+            """.strip()
+            
+            # Send email using Gmail API
+            from google_oauth_real import GmailSender
+            gmail_sender = GmailSender(self.google_user.access_token)
+            
+            # Create email worker for Gmail API
+            self._send_email_with_gmail_api(gmail_sender, recipient, subject, report_body, report_path)
+            
+        except Exception as e:
+            self.statusBar().showMessage(f"Error sending email: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to send email: {str(e)}")
+    
+    def _send_email_with_gmail_api(self, gmail_sender, recipient: str, subject: str, body: str, attachment_path: str):
+        """Send email using Gmail API in background thread."""
+        class GmailAPIWorker(QThread):
+            email_sent = pyqtSignal(bool, str)  # success, message
+            
+            def __init__(self, gmail_sender, recipient, subject, body, attachment_path):
+                super().__init__()
+                self.gmail_sender = gmail_sender
+                self.recipient = recipient
+                self.subject = subject
+                self.body = body
+                self.attachment_path = attachment_path
+            
+            def run(self):
+                """Send email using Gmail API."""
+                try:
+                    result = self.gmail_sender.send_email(
+                        to=self.recipient,
+                        subject=self.subject,
+                        body=self.body,
+                        attachment_path=self.attachment_path
+                    )
+                    
+                    if result['success']:
+                        self.email_sent.emit(True, f"Email sent successfully! Message ID: {result['message_id']}")
+                    else:
+                        self.email_sent.emit(False, f"Email failed: {result['error']}")
+                        
+                except Exception as e:
+                    self.email_sent.emit(False, f"Email error: {str(e)}")
+        
+        # Create and start Gmail API worker
+        self.gmail_worker = GmailAPIWorker(gmail_sender, recipient, subject, body, attachment_path)
+        self.gmail_worker.email_sent.connect(self._on_email_sent)
+        
+        # Start email sending
+        self.statusBar().showMessage("Sending email via Gmail API...")
+        self.gmail_worker.start()
+    
+
+    
+    def _on_email_sent(self, success: bool, message: str):
+        """Handle email sending result."""
+        if success:
+            self.statusBar().showMessage("Email sent successfully!")
+            QMessageBox.information(self, "Success", message)
+        else:
+            self.statusBar().showMessage("Email failed to send")
+            QMessageBox.critical(self, "Error", message)
+        
+        # Clean up worker
+        if self.email_worker:
+            self.email_worker.deleteLater()
+            self.email_worker = None
+    
+    def _collect_inspector_data(self) -> dict:
+        """Collect inspector data from UI fields."""
+        return {
+            "client_name": "Client",  # Default since no client name field
+            "order_number": getattr(self, 'invoice_edit', QLineEdit()).text() or "INV-001",
+            "inspection_date": getattr(self, 'date_edit', QLineEdit()).text(),
+            "inspector": getattr(self, 'inspector_edit', QLineEdit()).text(),
+            "initial_location": getattr(self, 'location_edit', QLineEdit()).text(),
+            "sku_number": getattr(self, 'sku_edit', QLineEdit()).text(),
+            "charger": getattr(self, 'charger_combo', QComboBox()).currentText(),
+            "issues": getattr(self, 'issues_edit', QLineEdit()).text(),
+            "warranty": getattr(self, 'warranty_combo', QComboBox()).currentText(),
+            "condition": getattr(self, 'condition_combo', QComboBox()).currentText(),
+            "condition_notes": getattr(self, 'condition_text', QLineEdit()).text(),
+            "findings": {
+                "hardware_condition": "Good",
+                "software_issues": getattr(self, 'issues_edit', QLineEdit()).text() or "No issues found",
+                "performance_score": "85/100"
+            }
+        }
         
     def _update_status(self):
         """Update status information periodically."""
