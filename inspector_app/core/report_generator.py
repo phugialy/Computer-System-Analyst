@@ -46,7 +46,17 @@ class ReportFormatter:
     """Formats and generates reports for the inspector application."""
     
     def __init__(self):
-        self.output_dir = Path.home() / "InspectorReports"
+        # Use Desktop as fallback for bundled applications
+        try:
+            desktop_path = Path.home() / "Desktop"
+            if desktop_path.exists():
+                self.output_dir = desktop_path / "InspectorReports"
+            else:
+                self.output_dir = Path.home() / "InspectorReports"
+        except Exception:
+            # Final fallback to current directory
+            self.output_dir = Path.cwd() / "InspectorReports"
+        
         self.output_dir.mkdir(exist_ok=True)
     
     def generate_report(
@@ -84,6 +94,26 @@ class ReportFormatter:
         """Create the report content."""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Get test results
+        test_results = inspector_data.get('test_results', {})
+        audio_test = test_results.get('audio_test', 'Not Tested')
+        dead_pixel_test = test_results.get('dead_pixel_test', 'Not Tested')
+        keyboard_test = test_results.get('keyboard_test', 'Not Tested')
+        
+        # Calculate overall test status
+        test_statuses = [audio_test, dead_pixel_test, keyboard_test]
+        passed_tests = sum(1 for status in test_statuses if status == 'Pass')
+        total_tests = sum(1 for status in test_statuses if status != 'Not Tested')
+        
+        if total_tests == 0:
+            overall_test_status = "No Tests Performed"
+        elif passed_tests == total_tests:
+            overall_test_status = "✅ ALL TESTS PASSED"
+        elif passed_tests > 0:
+            overall_test_status = "⚠️ PARTIAL PASS"
+        else:
+            overall_test_status = "❌ ALL TESTS FAILED"
+        
         report = f"""
 COMPUTER INSPECTION REPORT
 ═══════════════════════════════════════════════════════════════════════════════
@@ -104,6 +134,13 @@ Charger: {inspector_data.get('charger', 'N/A')}
 Warranty: {inspector_data.get('warranty', 'N/A')}
 Condition Rating: {inspector_data.get('condition', 'N/A')}/10
 Condition Notes: {inspector_data.get('condition_notes', 'N/A')}
+
+DIAGNOSTIC TEST RESULTS:
+═══════════════════════════════════════════════════════════════════════════════
+Audio Test: {audio_test}
+Dead Pixel Test: {dead_pixel_test}
+Keyboard Test: {keyboard_test}
+Overall Test Status: {overall_test_status}
 
 ISSUES FOUND:
 ═══════════════════════════════════════════════════════════════════════════════

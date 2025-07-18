@@ -5,10 +5,16 @@ Handles running diagnostic tests and system validations.
 
 import time
 import threading
+import os
+import sys
+from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from PyQt6.QtCore import QUrl
+from PyQt6.QtGui import QDesktopServices
 
 from .system_info import system_collector
 
@@ -212,6 +218,48 @@ class TestLauncher:
             NetworkConnectivityTest()
         ]
     
+    def play_audio_test(self) -> bool:
+        """Play test sound from assets directory."""
+        try:
+            # Get the path to the test sound file
+            if getattr(sys, 'frozen', False):
+                # Running as bundled executable
+                base_path = Path(sys._MEIPASS)
+            else:
+                # Running as script
+                base_path = Path(__file__).parent.parent
+            
+            audio_file = base_path / "assets" / "test_sound.mp3"
+            
+            if not audio_file.exists():
+                raise FileNotFoundError(f"Test sound file not found: {audio_file}")
+            
+            # Use QDesktopServices to play the audio file
+            url = QUrl.fromLocalFile(str(audio_file))
+            return QDesktopServices.openUrl(url)
+            
+        except Exception as e:
+            print(f"Error playing audio test: {e}")
+            return False
+    
+    def launch_dead_pixel_test(self) -> bool:
+        """Open dead pixel test in default browser."""
+        try:
+            url = QUrl("https://lcdtech.info/en/tests/dead.pixel.htm")
+            return QDesktopServices.openUrl(url)
+        except Exception as e:
+            print(f"Error launching dead pixel test: {e}")
+            return False
+    
+    def launch_keyboard_test(self) -> bool:
+        """Open keyboard test in default browser."""
+        try:
+            url = QUrl("https://en.key-test.ru/")
+            return QDesktopServices.openUrl(url)
+        except Exception as e:
+            print(f"Error launching keyboard test: {e}")
+            return False
+
     def run_all_tests(self, progress_callback: Optional[Callable] = None) -> List[TestResult]:
         """Run all available diagnostic tests."""
         self.is_running = True

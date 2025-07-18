@@ -4,6 +4,7 @@ Provides the primary interface for system diagnostics and reporting.
 """
 
 import datetime
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QGroupBox, QTabWidget,
@@ -16,11 +17,120 @@ from PyQt6.QtGui import QFont, QIcon, QPixmap
 # Import the system info collector
 from core.system_info import system_collector
 
+# Import test launcher
+from core.test_launcher import test_launcher
+
 # Import Gmail and report functionality
 from gmail_config import GmailConfigManager, setup_gmail_interactive, test_gmail_configuration
 from core.report_generator import ReportFormatter
 from core.email_sender import EmailSender, EmailConfig, EmailStatus
 from google_oauth_simple import GoogleAccountSelectionDialog, GoogleUser
+
+
+class CustomTestResultComboBox(QWidget):
+    """Custom combo box for test results with Pass, Fail, and custom input options."""
+    
+    valueChanged = pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the custom combo box UI."""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        
+        # Create the combo box
+        self.combo_box = QComboBox()
+        self.combo_box.addItems(["Not Tested", "Pass", "Fail", "Comments"])
+        self.combo_box.setFont(QFont("Segoe UI", 11))
+        self.combo_box.setMinimumHeight(40)
+        self.combo_box.setStyleSheet("""
+            QComboBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                padding: 10px 15px;
+                background-color: white;
+                color: #2c3e50;
+                font-size: 11px;
+            }
+            QComboBox:focus {
+                border: 2px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 25px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 6px solid #7f8c8d;
+                margin-right: 10px;
+            }
+        """)
+        
+        # Create the custom input field (initially hidden)
+        self.custom_input = QLineEdit()
+        self.custom_input.setFont(QFont("Segoe UI", 11))
+        self.custom_input.setMinimumHeight(40)
+        self.custom_input.setPlaceholderText("Enter custom result...")
+        self.custom_input.setStyleSheet("""
+            QLineEdit {
+                border: 2px solid #bdc3c7;
+                border-radius: 8px;
+                padding: 10px 15px;
+                background-color: white;
+                color: #2c3e50;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background-color: #f8f9fa;
+            }
+        """)
+        self.custom_input.hide()
+        
+        # Connect signals
+        self.combo_box.currentTextChanged.connect(self._on_combo_changed)
+        self.custom_input.textChanged.connect(self._on_custom_input_changed)
+        
+        # Add widgets to layout
+        layout.addWidget(self.combo_box)
+        layout.addWidget(self.custom_input)
+        
+    def _on_combo_changed(self, text):
+        """Handle combo box selection changes."""
+        if text == "Comments":
+            self.custom_input.show()
+            self.custom_input.setFocus()
+            self.valueChanged.emit("")
+        else:
+            self.custom_input.hide()
+            self.valueChanged.emit(text)
+            
+    def _on_custom_input_changed(self, text):
+        """Handle custom input text changes."""
+        if self.combo_box.currentText() == "Comments":
+            self.valueChanged.emit(text)
+            
+    def currentText(self):
+        """Get the current text value."""
+        if self.combo_box.currentText() == "Comments":
+            return self.custom_input.text()
+        return self.combo_box.currentText()
+        
+    def setCurrentText(self, text):
+        """Set the current text value."""
+        if text in ["Not Tested", "Pass", "Fail"]:
+            self.combo_box.setCurrentText(text)
+            self.custom_input.hide()
+        else:
+            self.combo_box.setCurrentText("Comments")
+            self.custom_input.setText(text)
+            self.custom_input.show()
 
 
 class EmailWorker(QThread):
@@ -66,8 +176,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Inspector Diagnostic Utility")
-        self.setGeometry(100, 100, 1200, 800)
-        self.setMinimumSize(1000, 600)
+        self.setGeometry(100, 100, 1600, 1000)
+        self.setMinimumSize(1400, 800)
         
         # Initialize Gmail and report components
         self.gmail_config = GmailConfigManager()
@@ -83,45 +193,48 @@ class MainWindow(QMainWindow):
         self._update_system_info()
         
     def _setup_ui(self):
-        """Initialize the main user interface with compact design."""
+        """Initialize the main user interface with spacious design."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Main layout with compact design
+        # Main layout with spacious design
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
         
-        # Simple title line
+        # Title
         self._create_simple_title(main_layout)
         
-        # Create a splitter for better space utilization
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.setChildrenCollapsible(False)
+        # Top section with three columns
+        top_section = QHBoxLayout()
+        top_section.setSpacing(20)
         
-        # Left panel for Client Order Info
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 8, 0)
-        self._create_client_order_section(left_layout)
+        # Client Order Info (left column)
+        client_panel = QWidget()
+        client_layout = QVBoxLayout(client_panel)
+        client_layout.setContentsMargins(0, 0, 0, 0)
+        self._create_client_order_section(client_layout)
         
-        # Right panel for System Info
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(8, 0, 0, 0)
-        self._create_system_info_section(right_layout)
+        # System Info (middle column)
+        system_panel = QWidget()
+        system_layout = QVBoxLayout(system_panel)
+        system_layout.setContentsMargins(0, 0, 0, 0)
+        self._create_system_info_section(system_layout)
         
-        # Add panels to splitter
-        main_splitter.addWidget(left_panel)
-        main_splitter.addWidget(right_panel)
-        main_splitter.setSizes([600, 600])  # Equal initial sizes
+        # Diagnostic Tests (right column)
+        tests_panel = QWidget()
+        tests_layout = QVBoxLayout(tests_panel)
+        tests_layout.setContentsMargins(0, 0, 0, 0)
+        self._create_diagnostic_tests_section(tests_layout)
         
-        main_layout.addWidget(main_splitter)
+        # Add panels to top section with different proportions
+        top_section.addWidget(client_panel, 1)
+        top_section.addWidget(system_panel, 3)  # Give system info much more space
+        top_section.addWidget(tests_panel, 1)
         
-        # Diagnostic Test buttons
-        self._create_diagnostic_tests_section(main_layout)
+        main_layout.addLayout(top_section)
         
-        # Email and Report section
+        # Email and Report section (full width at bottom)
         self._create_email_report_section(main_layout)
         
         # Status bar
@@ -137,51 +250,51 @@ class MainWindow(QMainWindow):
         parent_layout.addWidget(title_label)
         
     def _create_client_order_section(self, parent_layout):
-        """Create the Client Order Info section with compact layout."""
+        """Create the Client Order Info section with spacious layout."""
         order_group = QGroupBox("Client Order Information")
-        order_group.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        order_group.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         order_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 border: 2px solid #3498db;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
                 background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
+                left: 20px;
+                padding: 0 10px 0 10px;
                 color: #2c3e50;
             }
         """)
         
         order_layout = QVBoxLayout(order_group)
-        order_layout.setContentsMargins(15, 20, 15, 15)
-        order_layout.setSpacing(12)
+        order_layout.setContentsMargins(20, 25, 20, 20)
+        order_layout.setSpacing(15)
         
-        # Create styled labels and fields with compact sizing
+        # Create styled labels and fields with spacious sizing
         def create_field_pair(label_text, field, placeholder=None, readonly=False, field_type="line"):
-            # Create label with compact sizing
+            # Create label with spacious sizing
             label = QLabel(label_text)
-            label.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
-            label.setStyleSheet("color: #2c3e50; min-width: 120px; padding: 3px;")
+            label.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+            label.setStyleSheet("color: #2c3e50; min-width: 150px; padding: 5px;")
             label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             
-            # Create field with compact responsive sizing
+            # Create field with spacious responsive sizing
             if field_type == "line":
-                field.setFont(QFont("Segoe UI", 10))
-                field.setMinimumHeight(32)
+                field.setFont(QFont("Segoe UI", 11))
+                field.setMinimumHeight(40)
                 field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 field.setStyleSheet("""
                     QLineEdit {
                         border: 2px solid #bdc3c7;
-                        border-radius: 6px;
-                        padding: 8px 12px;
+                        border-radius: 8px;
+                        padding: 10px 15px;
                         background-color: white;
                         color: #2c3e50;
-                        font-size: 10px;
+                        font-size: 11px;
                     }
                     QLineEdit:focus {
                         border: 2px solid #3498db;
@@ -192,248 +305,178 @@ class MainWindow(QMainWindow):
                         color: #7f8c8d;
                     }
                 """)
+                
                 if placeholder:
                     field.setPlaceholderText(placeholder)
                 if readonly:
                     field.setReadOnly(True)
-            elif field_type == "combo":
-                field.setFont(QFont("Segoe UI", 10))
-                field.setMinimumHeight(32)
+                    
+            elif field_type == "text":
+                field.setFont(QFont("Segoe UI", 11))
+                field.setMinimumHeight(80)
                 field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 field.setStyleSheet("""
-                    QComboBox {
+                    QTextEdit {
                         border: 2px solid #bdc3c7;
-                        border-radius: 6px;
-                        padding: 8px 12px;
+                        border-radius: 8px;
+                        padding: 10px 15px;
                         background-color: white;
                         color: #2c3e50;
-                        font-size: 10px;
+                        font-size: 11px;
                     }
-                    QComboBox:focus {
+                    QTextEdit:focus {
                         border: 2px solid #3498db;
-                    }
-                    QComboBox::drop-down {
-                        border: none;
-                        width: 20px;
-                    }
-                    QComboBox::down-arrow {
-                        image: none;
-                        border-left: 5px solid transparent;
-                        border-right: 5px solid transparent;
-                        border-top: 5px solid #7f8c8d;
-                        margin-right: 8px;
+                        background-color: #f8f9fa;
                     }
                 """)
+                
+                if placeholder:
+                    field.setPlaceholderText(placeholder)
+                if readonly:
+                    field.setReadOnly(True)
             
-            return label, field
-        
-        # Date field (auto-filled, read-only)
-        date_label, self.date_edit = create_field_pair(
-            "Date:", QLineEdit(), readonly=True
-        )
-        self.date_edit.setText(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
-        
-        # Inspector field
-        inspector_label, self.inspector_edit = create_field_pair(
-            "Inspector:", QLineEdit(), "Enter inspector name"
-        )
-        
-        # Initial Location field
-        location_label, self.location_edit = create_field_pair(
-            "Initial Location:", QLineEdit(), "Enter initial location"
-        )
-        
-        # Invoice # field
-        invoice_label, self.invoice_edit = create_field_pair(
-            "Invoice #:", QLineEdit(), "Enter invoice number"
-        )
-        
-        # SKU # field
-        sku_label, self.sku_edit = create_field_pair(
-            "SKU #:", QLineEdit(), "Enter SKU number"
-        )
-        
-        # Charger field
-        charger_label, self.charger_combo = create_field_pair(
-            "Charger:", QComboBox(), field_type="combo"
-        )
-        self.charger_combo.addItems(["Yes", "No", "N/A"])
-        
-        # Issues field
-        issues_label, self.issues_edit = create_field_pair(
-            "Issues:", QLineEdit(), "Describe any issues found"
-        )
-        
-        # Warranty field
-        warranty_label, self.warranty_combo = create_field_pair(
-            "Warranty:", QComboBox(), field_type="combo"
-        )
-        self.warranty_combo.addItems(["Yes", "No", "N/A"])
-        
-        # Condition field with compact layout
-        condition_label = QLabel("Condition:")
-        condition_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
-        condition_label.setStyleSheet("color: #2c3e50; min-width: 120px; padding: 3px;")
-        
-        condition_layout = QHBoxLayout()
-        condition_layout.setSpacing(10)
-        
-        self.condition_combo = QComboBox()
-        self.condition_combo.addItems([str(i) for i in range(1, 11)])
-        self.condition_combo.setFont(QFont("Segoe UI", 10))
-        self.condition_combo.setMinimumHeight(32)
-        self.condition_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        self.condition_combo.setStyleSheet("""
-            QComboBox {
-                border: 2px solid #bdc3c7;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background-color: white;
-                color: #2c3e50;
-                font-size: 10px;
-                min-width: 80px;
-            }
-            QComboBox:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        
-        self.condition_text = QLineEdit()
-        self.condition_text.setPlaceholderText("Additional condition notes")
-        self.condition_text.setFont(QFont("Segoe UI", 10))
-        self.condition_text.setMinimumHeight(32)
-        self.condition_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.condition_text.setStyleSheet("""
-            QLineEdit {
-                border: 2px solid #bdc3c7;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background-color: white;
-                color: #2c3e50;
-                font-size: 10px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-                background-color: #f8f9fa;
-            }
-        """)
-        
-        condition_layout.addWidget(self.condition_combo)
-        condition_layout.addWidget(self.condition_text)
-        
-        # Add fields to layout with compact spacing
-        fields = [
-            (date_label, self.date_edit),
-            (inspector_label, self.inspector_edit),
-            (location_label, self.location_edit),
-            (invoice_label, self.invoice_edit),
-            (sku_label, self.sku_edit),
-            (charger_label, self.charger_combo),
-            (issues_label, self.issues_edit),
-            (warranty_label, self.warranty_combo),
-            (condition_label, condition_layout)
-        ]
-        
-        for label, field in fields:
+            # Create layout for this field pair
             field_layout = QHBoxLayout()
-            field_layout.setSpacing(10)
             field_layout.addWidget(label)
-            if isinstance(field, QLineEdit) or isinstance(field, QComboBox):
-                field_layout.addWidget(field)
-            else:
-                field_layout.addLayout(field)
-            order_layout.addLayout(field_layout)
+            field_layout.addWidget(field)
+            field_layout.setSpacing(15)
+            
+            return field_layout
+        
+        # Client Order fields with spacious responsive sizing
+        self.client_name = QLineEdit()
+        self.client_name.setPlaceholderText("Enter client name")
+        
+        self.order_number = QLineEdit()
+        self.order_number.setPlaceholderText("Enter order number")
+        
+        self.device_type = QLineEdit()
+        self.device_type.setPlaceholderText("Enter device type")
+        
+        self.inspector_name = QLineEdit()
+        self.inspector_name.setPlaceholderText("Enter inspector name")
+        
+        self.inspection_date = QLineEdit()
+        self.inspection_date.setPlaceholderText("Enter inspection date")
+        
+        self.notes = QTextEdit()
+        self.notes.setPlaceholderText("Enter any additional notes...")
+        
+        # Add fields to layout with spacious spacing
+        order_layout.addLayout(create_field_pair("Client Name:", self.client_name))
+        order_layout.addLayout(create_field_pair("Order Number:", self.order_number))
+        order_layout.addLayout(create_field_pair("Device Type:", self.device_type))
+        order_layout.addLayout(create_field_pair("Inspector Name:", self.inspector_name))
+        order_layout.addLayout(create_field_pair("Inspection Date:", self.inspection_date))
+        order_layout.addLayout(create_field_pair("Notes:", self.notes, field_type="text"))
         
         parent_layout.addWidget(order_group)
         
     def _create_system_info_section(self, parent_layout):
-        """Create the System Info section with compact layout."""
+        """Create the System Information section with enhanced visibility."""
         system_group = QGroupBox("System Information")
-        system_group.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        system_group.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         system_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 border: 2px solid #27ae60;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
                 background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
+                left: 20px;
+                padding: 0 10px 0 10px;
                 color: #2c3e50;
             }
         """)
         
         system_layout = QVBoxLayout(system_group)
-        system_layout.setContentsMargins(15, 20, 15, 15)
-        system_layout.setSpacing(12)
+        system_layout.setContentsMargins(20, 25, 20, 20)
+        system_layout.setSpacing(20)
         
-        # System info fields with compact organization
-        fields = [
-            ("Brand/Model:", "brand_model"),
-            ("CPU:", "cpu"),
-            ("RAM:", "ram"),
-            ("Storage:", "storage"),
-            ("GPU:", "gpu"),
-            ("OS:", "os"),
-            ("Display:", "display"),
-            ("Touch Support:", "touch_support"),
-            ("Fingerprint Reader:", "fingerprint_reader"),
-            ("Battery Health:", "battery_health")
-        ]
-        
-        self.system_fields = {}
-        for label_text, field_name in fields:
-            # Create label with compact sizing
+        # Create styled labels and fields with enhanced visibility
+        def create_system_field_pair(label_text, field, readonly=True):
+            # Create label with enhanced styling
             label = QLabel(label_text)
-            label.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
-            label.setStyleSheet("color: #2c3e50; min-width: 130px; padding: 3px;")
+            label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+            label.setStyleSheet("color: #2c3e50; min-width: 180px; padding: 8px;")
             label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             
-            # Create field with compact responsive sizing
-            field = QLineEdit()
-            field.setReadOnly(True)
-            field.setFont(QFont("Segoe UI", 10))
-            field.setMinimumHeight(32)
+            # Create field with enhanced styling for better visibility
+            field.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
+            field.setMinimumHeight(45)
+            field.setMinimumWidth(300)
             field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             field.setStyleSheet("""
                 QLineEdit {
-                    border: 2px solid #bdc3c7;
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    background-color: #ecf0f1;
-                    color: #7f8c8d;
-                    font-size: 10px;
+                    border: 3px solid #27ae60;
+                    border-radius: 10px;
+                    padding: 12px 18px;
+                    background-color: #f8f9fa;
+                    color: #2c3e50;
+                    font-size: 12px;
+                    font-weight: medium;
+                }
+                QLineEdit:read-only {
+                    background-color: #e8f5e8;
+                    color: #2c3e50;
+                    border: 3px solid #27ae60;
                 }
             """)
-            field.setText("Loading...")
+            
+            if readonly:
+                field.setReadOnly(True)
             
             # Create layout for this field pair
             field_layout = QHBoxLayout()
-            field_layout.setSpacing(10)
             field_layout.addWidget(label)
             field_layout.addWidget(field)
-            system_layout.addLayout(field_layout)
+            field_layout.setSpacing(20)
             
-            self.system_fields[field_name] = field
+            return field_layout
         
-        # Re-check Hardware Info button with compact styling
-        self.recheck_hardware_btn = QPushButton("🔁 Re-check Hardware Info")
-        self.recheck_hardware_btn.setMinimumHeight(40)
-        self.recheck_hardware_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.recheck_hardware_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # System Info fields with enhanced visibility
+        self.cpu_info = QLineEdit()
+        self.cpu_info.setReadOnly(True)
+        
+        self.memory_info = QLineEdit()
+        self.memory_info.setReadOnly(True)
+        
+        self.disk_info = QLineEdit()
+        self.disk_info.setReadOnly(True)
+        
+        self.os_info = QLineEdit()
+        self.os_info.setReadOnly(True)
+        
+        self.graphics_info = QLineEdit()
+        self.graphics_info.setReadOnly(True)
+        
+        self.network_info = QLineEdit()
+        self.network_info.setReadOnly(True)
+        
+        # Add fields to layout with enhanced spacing
+        system_layout.addLayout(create_system_field_pair("CPU:", self.cpu_info))
+        system_layout.addLayout(create_system_field_pair("Memory:", self.memory_info))
+        system_layout.addLayout(create_system_field_pair("Storage:", self.disk_info))
+        system_layout.addLayout(create_system_field_pair("Operating System:", self.os_info))
+        system_layout.addLayout(create_system_field_pair("Graphics:", self.graphics_info))
+        system_layout.addLayout(create_system_field_pair("Network:", self.network_info))
+        
+        # Recheck hardware button
+        self.recheck_hardware_btn = QPushButton("🔄 Recheck Hardware")
+        self.recheck_hardware_btn.setMinimumHeight(50)
+        self.recheck_hardware_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         self.recheck_hardware_btn.setStyleSheet("""
             QPushButton {
                 background-color: #27ae60;
                 color: white;
                 border: none;
-                padding: 10px 20px;
-                border-radius: 8px;
+                padding: 15px 25px;
+                border-radius: 10px;
                 font-weight: bold;
-                margin-top: 8px;
             }
             QPushButton:hover {
                 background-color: #229954;
@@ -448,42 +491,46 @@ class MainWindow(QMainWindow):
         parent_layout.addWidget(system_group)
         
     def _create_diagnostic_tests_section(self, parent_layout):
-        """Create the Diagnostic Test buttons section with compact layout."""
+        """Create the Diagnostic Test buttons section with spacious layout."""
         tests_group = QGroupBox("Diagnostic Tests")
-        tests_group.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        tests_group.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         tests_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 border: 2px solid #e74c3c;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
                 background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
+                left: 20px;
+                padding: 0 10px 0 10px;
                 color: #2c3e50;
             }
         """)
         
-        tests_layout = QHBoxLayout(tests_group)
-        tests_layout.setContentsMargins(15, 20, 15, 15)
-        tests_layout.setSpacing(15)
+        tests_layout = QVBoxLayout(tests_group)
+        tests_layout.setContentsMargins(20, 25, 20, 20)
+        tests_layout.setSpacing(20)
         
-        # Test buttons with compact responsive sizing
+        # Test buttons row
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(15)
+        
+        # Test buttons with spacious responsive sizing
         self.play_sound_btn = QPushButton("▶ Play Test Sound")
-        self.play_sound_btn.setMinimumHeight(45)
-        self.play_sound_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.play_sound_btn.setMinimumHeight(50)
+        self.play_sound_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         self.play_sound_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.play_sound_btn.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
                 color: white;
                 border: none;
-                padding: 12px 20px;
-                border-radius: 8px;
+                padding: 15px 25px;
+                border-radius: 10px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -495,16 +542,16 @@ class MainWindow(QMainWindow):
         """)
         
         self.dead_pixel_btn = QPushButton("🔍 Open Dead Pixel Test")
-        self.dead_pixel_btn.setMinimumHeight(45)
-        self.dead_pixel_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.dead_pixel_btn.setMinimumHeight(50)
+        self.dead_pixel_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         self.dead_pixel_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.dead_pixel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f39c12;
                 color: white;
                 border: none;
-                padding: 12px 20px;
-                border-radius: 8px;
+                padding: 15px 25px;
+                border-radius: 10px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -516,16 +563,16 @@ class MainWindow(QMainWindow):
         """)
         
         self.keyboard_test_btn = QPushButton("⌨ Launch Keyboard Test")
-        self.keyboard_test_btn.setMinimumHeight(45)
-        self.keyboard_test_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.keyboard_test_btn.setMinimumHeight(50)
+        self.keyboard_test_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         self.keyboard_test_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.keyboard_test_btn.setStyleSheet("""
             QPushButton {
                 background-color: #9b59b6;
                 color: white;
                 border: none;
-                padding: 12px 20px;
-                border-radius: 8px;
+                padding: 15px 25px;
+                border-radius: 10px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -536,9 +583,47 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        tests_layout.addWidget(self.play_sound_btn)
-        tests_layout.addWidget(self.dead_pixel_btn)
-        tests_layout.addWidget(self.keyboard_test_btn)
+        buttons_layout.addWidget(self.play_sound_btn)
+        buttons_layout.addWidget(self.dead_pixel_btn)
+        buttons_layout.addWidget(self.keyboard_test_btn)
+        
+        tests_layout.addLayout(buttons_layout)
+        
+        # Test results section
+        results_layout = QGridLayout()
+        results_layout.setSpacing(15)
+        results_layout.setColumnStretch(1, 1)  # Make the second column expandable
+        
+        # Audio test result
+        audio_label = QLabel("Audio Test Result:")
+        audio_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        audio_label.setStyleSheet("color: #2c3e50; min-width: 150px; padding: 5px;")
+        
+        self.audio_test_result = CustomTestResultComboBox()
+        
+        # Dead pixel test result
+        pixel_label = QLabel("Dead Pixel Test Result:")
+        pixel_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        pixel_label.setStyleSheet("color: #2c3e50; min-width: 150px; padding: 5px;")
+        
+        self.pixel_test_result = CustomTestResultComboBox()
+        
+        # Keyboard test result
+        keyboard_label = QLabel("Keyboard Test Result:")
+        keyboard_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        keyboard_label.setStyleSheet("color: #2c3e50; min-width: 150px; padding: 5px;")
+        
+        self.keyboard_test_result = CustomTestResultComboBox()
+        
+        # Add test result fields to grid
+        results_layout.addWidget(audio_label, 0, 0)
+        results_layout.addWidget(self.audio_test_result, 0, 1)
+        results_layout.addWidget(pixel_label, 1, 0)
+        results_layout.addWidget(self.pixel_test_result, 1, 1)
+        results_layout.addWidget(keyboard_label, 2, 0)
+        results_layout.addWidget(self.keyboard_test_result, 2, 1)
+        
+        tests_layout.addLayout(results_layout)
         
         parent_layout.addWidget(tests_group)
         
@@ -736,21 +821,104 @@ class MainWindow(QMainWindow):
         
     def _on_play_test_sound(self):
         """Handle play test sound button click."""
-        self.statusBar().showMessage("Playing test sound...")
-        # TODO: Implement sound playback
-        QMessageBox.information(self, "Test Sound", "Test sound functionality will be implemented.")
+        try:
+            self.statusBar().showMessage("Playing test sound...")
+            success = test_launcher.play_audio_test()
+            
+            if success:
+                self.statusBar().showMessage("Test sound played successfully")
+                # Ask user for test result
+                result = QMessageBox.question(
+                    self, 
+                    "Audio Test Result", 
+                    "Did the audio test pass?\n\nClick 'Yes' for Pass, 'No' for Fail, or 'Cancel' for Partial",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+                
+                if result == QMessageBox.StandardButton.Yes:
+                    self.audio_test_result.setCurrentText("Pass")
+                elif result == QMessageBox.StandardButton.No:
+                    self.audio_test_result.setCurrentText("Fail")
+                else:
+                    self.audio_test_result.setCurrentText("Partial")
+            else:
+                QMessageBox.warning(self, "Audio Test", "Failed to play test sound. Please check if the audio file exists.")
+                self.audio_test_result.setCurrentText("Fail")
+                
+        except Exception as e:
+            self.statusBar().showMessage(f"Error playing test sound: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to play test sound: {str(e)}")
+            self.audio_test_result.setCurrentText("Fail")
         
     def _on_open_dead_pixel_test(self):
         """Handle dead pixel test button click."""
-        self.statusBar().showMessage("Opening dead pixel test...")
-        # TODO: Implement dead pixel test
-        QMessageBox.information(self, "Dead Pixel Test", "Dead pixel test functionality will be implemented.")
+        try:
+            self.statusBar().showMessage("Opening dead pixel test...")
+            success = test_launcher.launch_dead_pixel_test()
+            
+            if success:
+                self.statusBar().showMessage("Dead pixel test opened in browser")
+                # Ask user for test result after a delay
+                QTimer.singleShot(2000, self._ask_pixel_test_result)
+            else:
+                QMessageBox.warning(self, "Dead Pixel Test", "Failed to open dead pixel test. Please check your internet connection.")
+                self.pixel_test_result.setCurrentText("Fail")
+                
+        except Exception as e:
+            self.statusBar().showMessage(f"Error opening dead pixel test: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open dead pixel test: {str(e)}")
+            self.pixel_test_result.setCurrentText("Fail")
+    
+    def _ask_pixel_test_result(self):
+        """Ask user for dead pixel test result."""
+        result = QMessageBox.question(
+            self, 
+            "Dead Pixel Test Result", 
+            "Did the dead pixel test pass?\n\nClick 'Yes' for Pass, 'No' for Fail, or 'Cancel' for Partial",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        )
+        
+        if result == QMessageBox.StandardButton.Yes:
+            self.pixel_test_result.setCurrentText("Pass")
+        elif result == QMessageBox.StandardButton.No:
+            self.pixel_test_result.setCurrentText("Fail")
+        else:
+            self.pixel_test_result.setCurrentText("Partial")
         
     def _on_launch_keyboard_test(self):
         """Handle keyboard test button click."""
-        self.statusBar().showMessage("Launching keyboard test...")
-        # TODO: Implement keyboard test
-        QMessageBox.information(self, "Keyboard Test", "Keyboard test functionality will be implemented.")
+        try:
+            self.statusBar().showMessage("Launching keyboard test...")
+            success = test_launcher.launch_keyboard_test()
+            
+            if success:
+                self.statusBar().showMessage("Keyboard test opened in browser")
+                # Ask user for test result after a delay
+                QTimer.singleShot(2000, self._ask_keyboard_test_result)
+            else:
+                QMessageBox.warning(self, "Keyboard Test", "Failed to open keyboard test. Please check your internet connection.")
+                self.keyboard_test_result.setCurrentText("Fail")
+                
+        except Exception as e:
+            self.statusBar().showMessage(f"Error launching keyboard test: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to launch keyboard test: {str(e)}")
+            self.keyboard_test_result.setCurrentText("Fail")
+    
+    def _ask_keyboard_test_result(self):
+        """Ask user for keyboard test result."""
+        result = QMessageBox.question(
+            self, 
+            "Keyboard Test Result", 
+            "Did the keyboard test pass?\n\nClick 'Yes' for Pass, 'No' for Fail, or 'Cancel' for Partial",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        )
+        
+        if result == QMessageBox.StandardButton.Yes:
+            self.keyboard_test_result.setCurrentText("Pass")
+        elif result == QMessageBox.StandardButton.No:
+            self.keyboard_test_result.setCurrentText("Fail")
+        else:
+            self.keyboard_test_result.setCurrentText("Partial")
         
     def _on_recheck_hardware(self):
         """Handle re-check hardware button click."""
@@ -765,16 +933,35 @@ class MainWindow(QMainWindow):
             system_data = system_collector.get_system_info()
             
             # Update UI fields with collected data
-            for field_name, value in system_data.items():
-                if field_name in self.system_fields:
-                    self.system_fields[field_name].setText(str(value))
+            if hasattr(self, 'cpu_info'):
+                self.cpu_info.setText(str(system_data.get('cpu', 'N/A')))
+            if hasattr(self, 'memory_info'):
+                self.memory_info.setText(str(system_data.get('ram', 'N/A')))
+            if hasattr(self, 'disk_info'):
+                self.disk_info.setText(str(system_data.get('storage', 'N/A')))
+            if hasattr(self, 'os_info'):
+                self.os_info.setText(str(system_data.get('os', 'N/A')))
+            if hasattr(self, 'graphics_info'):
+                self.graphics_info.setText(str(system_data.get('gpu', 'N/A')))
+            if hasattr(self, 'network_info'):
+                self.network_info.setText(str(system_data.get('network', 'N/A')))
             
             self.statusBar().showMessage("Hardware information updated successfully")
         except Exception as e:
             self.statusBar().showMessage(f"Error updating hardware info: {str(e)}")
             # Set error state for fields
-            for field in self.system_fields.values():
-                field.setText("Error")
+            if hasattr(self, 'cpu_info'):
+                self.cpu_info.setText("Error")
+            if hasattr(self, 'memory_info'):
+                self.memory_info.setText("Error")
+            if hasattr(self, 'disk_info'):
+                self.disk_info.setText("Error")
+            if hasattr(self, 'os_info'):
+                self.os_info.setText("Error")
+            if hasattr(self, 'graphics_info'):
+                self.graphics_info.setText("Error")
+            if hasattr(self, 'network_info'):
+                self.network_info.setText("Error")
         
     def _on_generate_report(self):
         """Handle generate report button click."""
@@ -814,9 +1001,18 @@ class MainWindow(QMainWindow):
             # Get system data
             system_data = system_collector.get_system_info()
             
+            # Set default save location to Desktop if available
+            default_path = ""
+            try:
+                desktop_path = Path.home() / "Desktop"
+                if desktop_path.exists():
+                    default_path = str(desktop_path / "computer_inspection_report.txt")
+            except Exception:
+                pass
+            
             # Ask user for save location
             file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Report", "", "Text Files (*.txt);;All Files (*)"
+                self, "Save Report", default_path, "Text Files (*.txt);;All Files (*)"
             )
             
             if file_path:
@@ -915,6 +1111,26 @@ class MainWindow(QMainWindow):
             subject = "Computer Inspection Report"
             
             # Create detailed report content for email body
+            # Get test results
+            test_results = inspector_data.get('test_results', {})
+            audio_test = test_results.get('audio_test', 'Not Tested')
+            dead_pixel_test = test_results.get('dead_pixel_test', 'Not Tested')
+            keyboard_test = test_results.get('keyboard_test', 'Not Tested')
+            
+            # Calculate overall test status
+            test_statuses = [audio_test, dead_pixel_test, keyboard_test]
+            passed_tests = sum(1 for status in test_statuses if status == 'Pass')
+            total_tests = sum(1 for status in test_statuses if status != 'Not Tested')
+            
+            if total_tests == 0:
+                overall_test_status = "No Tests Performed"
+            elif passed_tests == total_tests:
+                overall_test_status = "✅ ALL TESTS PASSED"
+            elif passed_tests > 0:
+                overall_test_status = "⚠️ PARTIAL PASS"
+            else:
+                overall_test_status = "❌ ALL TESTS FAILED"
+            
             report_body = f"""
 Dear Client,
 
@@ -924,32 +1140,28 @@ REPORT SUMMARY:
 ═══════════════════════════════════════════════════════════════════════════════
 
 INSPECTION DETAILS:
+• Client: {inspector_data.get('client_name', 'N/A')}
+• Order Number: {inspector_data.get('order_number', 'N/A')}
+• Device Type: {inspector_data.get('device_type', 'N/A')}
 • Inspector: {inspector_data.get('inspector', 'N/A')}
-• Invoice #: {inspector_data.get('order_number', 'N/A')}
 • Inspection Date: {inspector_data.get('inspection_date', 'N/A')}
-• Location: {inspector_data.get('initial_location', 'N/A')}
-• SKU: {inspector_data.get('sku_number', 'N/A')}
 
-DEVICE CONDITION:
-• Charger: {inspector_data.get('charger', 'N/A')}
-• Warranty: {inspector_data.get('warranty', 'N/A')}
-• Condition Rating: {inspector_data.get('condition', 'N/A')}/10
-• Condition Notes: {inspector_data.get('condition_notes', 'N/A')}
+DIAGNOSTIC TEST RESULTS:
+• Audio Test: {audio_test}
+• Dead Pixel Test: {dead_pixel_test}
+• Keyboard Test: {keyboard_test}
+• Overall Test Status: {overall_test_status}
 
-ISSUES FOUND:
-• {inspector_data.get('issues', 'No issues found')}
+NOTES:
+• {inspector_data.get('notes', 'No additional notes')}
 
 SYSTEM SPECIFICATIONS:
-• Brand/Model: {system_data.get('brand_model', 'N/A')}
 • CPU: {system_data.get('cpu', 'N/A')}
-• RAM: {system_data.get('ram', 'N/A')}
+• Memory: {system_data.get('ram', 'N/A')}
 • Storage: {system_data.get('storage', 'N/A')}
-• GPU: {system_data.get('gpu', 'N/A')}
 • Operating System: {system_data.get('os', 'N/A')}
-• Display: {system_data.get('display', 'N/A')}
-• Touch Support: {system_data.get('touch_support', 'N/A')}
-• Fingerprint Reader: {system_data.get('fingerprint_reader', 'N/A')}
-• Battery Health: {system_data.get('battery_health', 'N/A')}
+• Graphics: {system_data.get('gpu', 'N/A')}
+• Network: {system_data.get('network', 'N/A')}
 
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1033,20 +1245,20 @@ Computer Inspector Team
     def _collect_inspector_data(self) -> dict:
         """Collect inspector data from UI fields."""
         return {
-            "client_name": "Client",  # Default since no client name field
-            "order_number": getattr(self, 'invoice_edit', QLineEdit()).text() or "INV-001",
-            "inspection_date": getattr(self, 'date_edit', QLineEdit()).text(),
-            "inspector": getattr(self, 'inspector_edit', QLineEdit()).text(),
-            "initial_location": getattr(self, 'location_edit', QLineEdit()).text(),
-            "sku_number": getattr(self, 'sku_edit', QLineEdit()).text(),
-            "charger": getattr(self, 'charger_combo', QComboBox()).currentText(),
-            "issues": getattr(self, 'issues_edit', QLineEdit()).text(),
-            "warranty": getattr(self, 'warranty_combo', QComboBox()).currentText(),
-            "condition": getattr(self, 'condition_combo', QComboBox()).currentText(),
-            "condition_notes": getattr(self, 'condition_text', QLineEdit()).text(),
+            "client_name": getattr(self, 'client_name', QLineEdit()).text(),
+            "order_number": getattr(self, 'order_number', QLineEdit()).text(),
+            "device_type": getattr(self, 'device_type', QLineEdit()).text(),
+            "inspector": getattr(self, 'inspector_name', QLineEdit()).text(),
+            "inspection_date": getattr(self, 'inspection_date', QLineEdit()).text(),
+            "notes": getattr(self, 'notes', QTextEdit()).toPlainText(),
+            "test_results": {
+                "audio_test": getattr(self, 'audio_test_result', CustomTestResultComboBox()).currentText(),
+                "dead_pixel_test": getattr(self, 'pixel_test_result', CustomTestResultComboBox()).currentText(),
+                "keyboard_test": getattr(self, 'keyboard_test_result', CustomTestResultComboBox()).currentText()
+            },
             "findings": {
                 "hardware_condition": "Good",
-                "software_issues": getattr(self, 'issues_edit', QLineEdit()).text() or "No issues found",
+                "software_issues": getattr(self, 'notes', QTextEdit()).toPlainText() or "No issues found",
                 "performance_score": "85/100"
             }
         }
