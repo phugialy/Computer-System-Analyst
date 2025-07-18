@@ -1,10 +1,10 @@
 ---
-description:
-globs:
-alwaysApply: false
+alwaysApply: true
 ---
 ALWAYS ANALYZE THE CODE BASE in the ENTIRE REPO and CONSIDER Optimal Solutions before PROVIDE options to fit request.
 Build a desktop app to support inspectiong process inside a window enviroment and specifcally windown laptop and pc. 
 Writing code focus on code-to-build and prioritize buildable then Look and feels. 
 You have permission to write .env or other private files for this project. 
 Be flexible and Adapt to changes on the fly. Be ready for reverse multiples time when encounters UI\UX changes.
+
+The enviroment is Window and does not running with "&&" operator

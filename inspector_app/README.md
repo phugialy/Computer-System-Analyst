@@ -1,135 +1,118 @@
-# Inspector Diagnostic Utility
+# Computer Device Inspection App
 
-A comprehensive system inspection and diagnostic tool built with PyQt6.
+A comprehensive desktop application for inspecting and documenting computer hardware specifications and condition.
 
 ## Features
 
-- **System Information**: Collect and display detailed system information
-- **Performance Monitoring**: Real-time CPU, memory, and disk usage monitoring
-- **Diagnostic Scans**: Run comprehensive system diagnostics with customizable options
-- **Report Generation**: Generate reports in multiple formats (HTML, PDF, TXT, JSON)
-- **Email Integration**: Send diagnostic reports via email
-- **Modular Architecture**: Clean, maintainable code structure ready for feature injection
+### System Information Collection
+- **Brand/Model**: Automatically detects computer brand and model using WMIC
+- **CPU**: Processor information with core count and frequency
+- **RAM**: Total system memory in GB
+- **Storage**: Total storage capacity in GB
+- **GPU**: Graphics card information using GPUtil
+- **OS**: Operating system and version details
+- **Display**: Screen resolution detection
+- **Touch Support**: Detects touch screen capability
+- **Fingerprint Reader**: Checks for fingerprint reader hardware
+- **Battery Health**: Battery percentage and status
 
-## Project Structure
+### User Interface
+- **Real-time System Info**: All hardware information is automatically populated on startup
+- **Refresh Capability**: "Re-check Hardware Info" button updates all system information
+- **Read-only Fields**: System information fields are read-only for data integrity
+- **Error Handling**: Graceful fallback to "N/A" for unavailable hardware features
 
+### Diagnostic Tools
+- **Test Sound**: Audio testing functionality
+- **Dead Pixel Test**: Screen quality assessment
+- **Keyboard Test**: Input device verification
+
+### Report Generation
+- **Client Information**: Order details, inspector info, and device condition
+- **Email Integration**: Send reports directly via email
+- **Local Saving**: Save reports in multiple formats
+
+## Technical Implementation
+
+### SystemInfoCollector Class
+The core system information collection is handled by the `SystemInfoCollector` class in `core/system_info.py`:
+
+```python
+from core.system_info import system_collector
+
+# Get comprehensive system information
+info = system_collector.get_system_info()
 ```
-inspector_app/
-├── main.py                 # Application entry point
-├── requirements.txt        # Python dependencies
-├── README.md              # This file
-├── admin.manifest         # Windows UAC manifest
-├── ui/
-│   ├── __init__.py
-│   └── main_window.py     # Main GUI window
-├── core/
-│   ├── __init__.py
-│   ├── system_info.py     # System information collection
-│   ├── inspector_input.py # Input validation and processing
-│   ├── report_generator.py # Report generation
-│   ├── email_sender.py    # Email functionality
-│   └── test_launcher.py   # Diagnostic test execution
-└── assets/
-    └── test_sound.mp3     # Placeholder asset file
-```
+
+**Key Methods:**
+- `get_system_info()`: Returns complete hardware information dictionary
+- `refresh_info()`: Updates cached system information
+- `get_cached_info()`: Retrieves cached information
+
+**Hardware Detection Methods:**
+- `_get_brand_model()`: Uses WMIC to detect computer model
+- `_get_cpu_info()`: CPU information via platform and psutil
+- `_get_ram_info()`: Total memory calculation
+- `_get_storage_info()`: Storage capacity across all partitions
+- `_get_gpu_info()`: GPU detection using GPUtil
+- `_get_os_info()`: Operating system details
+- `_get_display_info()`: Screen resolution via screeninfo
+- `_get_touch_support()`: Touch screen detection via WMIC
+- `_get_fingerprint_reader()`: Fingerprint hardware detection
+- `_get_battery_health()`: Battery status via psutil
+
+### Error Handling
+All hardware detection methods include comprehensive error handling:
+- Subprocess timeouts (10 seconds)
+- File not found errors
+- Permission errors
+- Graceful fallback to "N/A" for unavailable features
+
+### UI Integration
+The main window (`ui/main_window.py`) automatically:
+- Loads system information on startup
+- Updates fields when "Re-check Hardware Info" is clicked
+- Displays all information in read-only QLabel fields
+- Provides real-time status updates
 
 ## Installation
 
-1. **Install Python Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-2. **Run the Application**:
-   ```bash
-   python main.py
-   ```
-
-## Usage
-
-### Quick Start
-1. Launch the application
-2. Use the "Quick System Scan" button for basic diagnostics
-3. Use the "Full Diagnostic Scan" button for comprehensive analysis
-4. Generate reports in your preferred format
-5. Send reports via email if needed
-
-### Features Overview
-
-#### System Information Tab
-- View basic system information (OS, CPU, RAM, Storage)
-- Monitor real-time performance metrics
-- Refresh system data on demand
-
-#### Diagnostics Tab
-- Select scan options (System, Performance, Security, Network, Hardware)
-- Start/stop diagnostic scans
-- View scan progress and results
-- Customize scan parameters
-
-#### Reporting Tab
-- Configure report settings (title, format, options)
-- Generate reports in multiple formats
-- Save reports to custom locations
-- Send reports via email
-
-#### Settings Tab
-- Configure auto-refresh intervals
-- Set log levels and thread limits
-- Manage application preferences
-
-## Development
-
-### Architecture
-
-The application follows a modular architecture with clear separation of concerns:
-
-- **UI Layer**: PyQt6-based user interface
-- **Core Layer**: Business logic and system operations
-- **Data Layer**: System information collection and processing
-
-### Adding New Features
-
-1. **UI Components**: Add to `ui/main_window.py`
-2. **Business Logic**: Add to appropriate core module
-3. **System Operations**: Extend `core/system_info.py`
-4. **Input Validation**: Extend `core/inspector_input.py`
-
-### Code Standards
-
-- Follow PEP 8 style guidelines
-- Use type hints throughout
-- Include comprehensive error handling
-- Write descriptive docstrings
-- Maintain modular function structure
+2. Run the application:
+```bash
+python main.py
+```
 
 ## Dependencies
 
 - **PyQt6**: Modern GUI framework
 - **psutil**: System and process utilities
-- **platform-utils**: Platform-specific utilities
+- **GPUtil**: GPU information detection
+- **screeninfo**: Display resolution detection
 
-## Future Enhancements
+## Usage
 
-- **Real-time Monitoring**: Live system monitoring dashboard
-- **Advanced Diagnostics**: Deep system analysis tools
-- **Custom Reports**: User-defined report templates
-- **Plugin System**: Extensible architecture for custom modules
-- **Cloud Integration**: Remote monitoring and reporting
-- **Automated Testing**: Comprehensive test suite
+1. **Start the Application**: Launch `main.py`
+2. **System Information**: Hardware details are automatically populated
+3. **Client Information**: Fill in order details and inspection information
+4. **Diagnostic Tests**: Use the test buttons to verify hardware functionality
+5. **Generate Reports**: Create and send inspection reports
 
-## Contributing
+## System Requirements
 
-1. Follow the established code structure
-2. Add appropriate error handling
-3. Include input validation
-4. Test thoroughly before submitting
-5. Update documentation as needed
+- Windows 10/11 (primary target)
+- Python 3.8+
+- Administrator privileges for some hardware detection features
 
-## License
+## Development
 
-This project is developed by DNCL for internal use and demonstration purposes.
+The application follows modular architecture:
+- `core/`: Business logic and system information collection
+- `ui/`: User interface components
+- `assets/`: Application resources
 
-## Support
-
-For issues or questions, please refer to the project documentation or contact the development team. 
+All code follows clean architecture principles with proper separation of concerns and comprehensive error handling. 

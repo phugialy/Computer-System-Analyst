@@ -13,6 +13,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
+# Import the system info collector
+from core.system_info import system_collector
+
 
 class MainWindow(QMainWindow):
     """Main application window with diagnostic interface."""
@@ -32,6 +35,9 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_connections()
         self._setup_status_timer()
+        
+        # Load initial system information
+        self._update_system_info()
         
     def _setup_ui(self):
         """Initialize the main user interface with compact design."""
@@ -332,7 +338,7 @@ class MainWindow(QMainWindow):
             ("OS:", "os"),
             ("Display:", "display"),
             ("Touch Support:", "touch_support"),
-            ("Fingerprint Reader:", "fingerprint"),
+            ("Fingerprint Reader:", "fingerprint_reader"),
             ("Battery Health:", "battery_health")
         ]
         
@@ -672,26 +678,22 @@ class MainWindow(QMainWindow):
         self._update_system_info()
         
     def _update_system_info(self):
-        """Update system information fields."""
-        # Placeholder implementation - will be connected to actual system info
-        system_data = {
-            'brand_model': 'Dell Latitude 5520',
-            'cpu': 'Intel Core i7-1165G7 @ 2.80GHz',
-            'ram': '16 GB DDR4',
-            'storage': '512 GB NVMe SSD',
-            'gpu': 'Intel Iris Xe Graphics',
-            'os': 'Windows 11 Pro 22H2',
-            'display': '15.6" 1920x1080',
-            'touch_support': 'No',
-            'fingerprint': 'Yes',
-            'battery_health': '85%'
-        }
-        
-        for field_name, value in system_data.items():
-            if field_name in self.system_fields:
-                self.system_fields[field_name].setText(value)
-        
-        self.statusBar().showMessage("Hardware information updated")
+        """Update system information fields using SystemInfoCollector."""
+        try:
+            # Get system information from the collector
+            system_data = system_collector.get_system_info()
+            
+            # Update UI fields with collected data
+            for field_name, value in system_data.items():
+                if field_name in self.system_fields:
+                    self.system_fields[field_name].setText(str(value))
+            
+            self.statusBar().showMessage("Hardware information updated successfully")
+        except Exception as e:
+            self.statusBar().showMessage(f"Error updating hardware info: {str(e)}")
+            # Set error state for fields
+            for field in self.system_fields.values():
+                field.setText("Error")
         
     def _on_generate_report(self):
         """Handle generate report button click."""

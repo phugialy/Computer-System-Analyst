@@ -5,207 +5,415 @@ Provides comprehensive system information gathering capabilities.
 
 import platform
 import psutil
+import subprocess
+import GPUtil
+import screeninfo
 from typing import Dict, List, Optional, Tuple
 
 
 class SystemInfoCollector:
-    """Collects and manages system information."""
+    """Collects and manages system information for computer inspection."""
     
     def __init__(self):
         self._cached_info = {}
         self._last_update = None
         
-    def get_basic_system_info(self) -> Dict[str, str]:
-        """Get basic system information."""
+    def get_system_info(self) -> Dict[str, str]:
+        """
+        Get comprehensive system information for inspection.
+        
+        Returns:
+            Dict containing system information with keys:
+            - brand_model: Computer brand and model
+            - cpu: CPU information
+            - ram: Total RAM in GB
+            - storage: Total storage in GB
+            - gpu: GPU information
+            - os: Operating system and version
+            - display: Display resolution
+            - touch_support: Touch screen support
+            - fingerprint_reader: Fingerprint reader availability
+            - battery_health: Battery health status
+        """
         try:
             return {
-                'os_name': platform.system(),
-                'os_version': platform.version(),
-                'os_release': platform.release(),
-                'architecture': platform.architecture()[0],
-                'machine': platform.machine(),
-                'processor': platform.processor(),
-                'hostname': platform.node()
+                'brand_model': self._get_brand_model(),
+                'cpu': self._get_cpu_info(),
+                'ram': self._get_ram_info(),
+                'storage': self._get_storage_info(),
+                'gpu': self._get_gpu_info(),
+                'os': self._get_os_info(),
+                'display': self._get_display_info(),
+                'touch_support': self._get_touch_support(),
+                'fingerprint_reader': self._get_fingerprint_reader(),
+                'battery_health': self._get_battery_health()
             }
         except Exception as e:
+            # Return default values if collection fails
             return {
-                'error': f"Failed to collect basic system info: {str(e)}"
+                'brand_model': 'N/A',
+                'cpu': 'N/A',
+                'ram': 'N/A',
+                'storage': 'N/A',
+                'gpu': 'N/A',
+                'os': 'N/A',
+                'display': 'N/A',
+                'touch_support': 'N/A',
+                'fingerprint_reader': 'N/A',
+                'battery_health': 'N/A'
             }
     
-    def get_cpu_info(self) -> Dict[str, any]:
-        """Get detailed CPU information."""
+    def _get_brand_model(self) -> str:
+        """Get computer brand and model using PowerShell."""
         try:
-            cpu_info = {
-                'physical_cores': psutil.cpu_count(logical=False),
-                'logical_cores': psutil.cpu_count(logical=True),
-                'cpu_usage_percent': psutil.cpu_percent(interval=1),
-                'cpu_freq': psutil.cpu_freq()._asdict() if psutil.cpu_freq() else {},
-                'cpu_stats': psutil.cpu_stats()._asdict()
-            }
-            return cpu_info
-        except Exception as e:
-            return {
-                'error': f"Failed to collect CPU info: {str(e)}"
-            }
+            # Use Get-WmiObject instead of Get-CimInstance for better compatibility
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_ComputerSystem | Select-Object Manufacturer, Model | ConvertTo-Csv -NoTypeInformation'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    # Parse CSV output: "Manufacturer","Model"
+                    # Handle CSV with commas in manufacturer names
+                    csv_line = lines[1].strip()
+                    # Find the last comma to separate manufacturer and model
+                    last_comma_index = csv_line.rfind(',')
+                    if last_comma_index > 0:
+                        manufacturer_part = csv_line[:last_comma_index].strip('"')
+                        model_part = csv_line[last_comma_index + 1:].strip('"')
+                        # Simplify manufacturer name
+                        simplified_brand = self._simplify_brand_name(manufacturer_part)
+                        
+                        if simplified_brand and model_part:
+                            return f"{simplified_brand} {model_part}"
+                        elif model_part:
+                            return model_part
+                        elif simplified_brand:
+                            return simplified_brand
+            
+            # Fallback to wmic if PowerShell fails
+            result = subprocess.run(
+                ['wmic', 'csproduct', 'get', 'name'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=True
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    model = lines[1].strip()
+                    if model and model != "Name":
+                        return model
+            
+            return "N/A"
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return "N/A"
     
-    def get_memory_info(self) -> Dict[str, any]:
-        """Get memory information."""
+    def _get_cpu_info(self) -> str:
+        """Get CPU information using PowerShell to get proper processor name."""
+        try:
+            # Try PowerShell to get the actual processor name
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_Processor | Select-Object Name | ConvertTo-Csv -NoTypeInformation'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    # Parse CSV output: "Name"
+                    csv_line = lines[1].strip()
+                    if csv_line.startswith('"') and csv_line.endswith('"'):
+                        processor_name = csv_line[1:-1].strip()  # Remove quotes and extra spaces
+                        if processor_name and processor_name != "Name":
+                            return processor_name
+            
+            # Fallback to platform.processor()
+            processor = platform.processor()
+            if processor and processor != "":
+                return processor
+            
+            # Final fallback to psutil for CPU info
+            cpu_count = psutil.cpu_count(logical=True)
+            cpu_freq = psutil.cpu_freq()
+            if cpu_freq:
+                return f"{cpu_count} cores @ {cpu_freq.current:.1f} GHz"
+            else:
+                return f"{cpu_count} cores"
+        except Exception:
+            return "N/A"
+    
+    def _get_ram_info(self) -> str:
+        """Get total RAM in GB."""
         try:
             memory = psutil.virtual_memory()
-            return {
-                'total': memory.total,
-                'available': memory.available,
-                'used': memory.used,
-                'free': memory.free,
-                'percent': memory.percent,
-                'formatted_total': self._format_bytes(memory.total),
-                'formatted_available': self._format_bytes(memory.available),
-                'formatted_used': self._format_bytes(memory.used)
-            }
-        except Exception as e:
-            return {
-                'error': f"Failed to collect memory info: {str(e)}"
-            }
+            total_gb = memory.total / (1024**3)
+            return f"{total_gb:.1f} GB"
+        except Exception:
+            return "N/A"
     
-    def get_disk_info(self) -> List[Dict[str, any]]:
-        """Get disk information for all partitions."""
+    def _get_storage_info(self) -> str:
+        """Get total storage in GB."""
         try:
-            disk_info = []
+            total_bytes = 0
             for partition in psutil.disk_partitions():
                 try:
                     usage = psutil.disk_usage(partition.mountpoint)
-                    disk_info.append({
-                        'device': partition.device,
-                        'mountpoint': partition.mountpoint,
-                        'filesystem': partition.fstype,
-                        'total': usage.total,
-                        'used': usage.used,
-                        'free': usage.free,
-                        'percent': usage.percent,
-                        'formatted_total': self._format_bytes(usage.total),
-                        'formatted_used': self._format_bytes(usage.used),
-                        'formatted_free': self._format_bytes(usage.free)
-                    })
-                except PermissionError:
-                    continue
-            return disk_info
-        except Exception as e:
-            return [{'error': f"Failed to collect disk info: {str(e)}"}]
-    
-    def get_network_info(self) -> Dict[str, any]:
-        """Get network interface information."""
-        try:
-            network_info = {
-                'interfaces': {},
-                'connections': []
-            }
-            
-            # Network interfaces
-            for interface, addresses in psutil.net_if_addrs().items():
-                network_info['interfaces'][interface] = []
-                for addr in addresses:
-                    network_info['interfaces'][interface].append({
-                        'family': str(addr.family),
-                        'address': addr.address,
-                        'netmask': addr.netmask,
-                        'broadcast': addr.broadcast
-                    })
-            
-            # Network connections
-            for conn in psutil.net_connections():
-                network_info['connections'].append({
-                    'family': str(conn.family),
-                    'type': str(conn.type),
-                    'local_address': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else None,
-                    'remote_address': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
-                    'status': conn.status
-                })
-            
-            return network_info
-        except Exception as e:
-            return {
-                'error': f"Failed to collect network info: {str(e)}"
-            }
-    
-    def get_process_info(self) -> List[Dict[str, any]]:
-        """Get information about running processes."""
-        try:
-            processes = []
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
-                try:
-                    processes.append({
-                        'pid': proc.info['pid'],
-                        'name': proc.info['name'],
-                        'cpu_percent': proc.info['cpu_percent'],
-                        'memory_percent': proc.info['memory_percent']
-                    })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    total_bytes += usage.total
+                except (PermissionError, FileNotFoundError):
                     continue
             
-            # Sort by CPU usage
-            processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
-            return processes[:20]  # Return top 20 processes
-        except Exception as e:
-            return [{'error': f"Failed to collect process info: {str(e)}"}]
+            if total_bytes > 0:
+                total_gb = total_bytes / (1024**3)
+                return f"{total_gb:.1f} GB"
+            else:
+                return "N/A"
+        except Exception:
+            return "N/A"
     
-    def get_system_uptime(self) -> Dict[str, any]:
-        """Get system uptime information."""
+    def _get_gpu_info(self) -> str:
+        """Get GPU information using PowerShell to get actual GPU names."""
         try:
-            boot_time = psutil.boot_time()
-            uptime_seconds = psutil.time.time() - boot_time
-            return {
-                'boot_time': boot_time,
-                'uptime_seconds': uptime_seconds,
-                'uptime_formatted': self._format_uptime(uptime_seconds)
-            }
-        except Exception as e:
-            return {
-                'error': f"Failed to collect uptime info: {str(e)}"
-            }
+            # Try PowerShell to get actual GPU names
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_VideoController | Select-Object Name | ConvertTo-Csv -NoTypeInformation'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    gpu_names = []
+                    for line in lines[1:]:  # Skip header
+                        if line.strip():
+                            # Parse CSV output: "Name"
+                            if line.startswith('"') and line.endswith('"'):
+                                gpu_name = line[1:-1].strip()  # Remove quotes and spaces
+                                if gpu_name and gpu_name != "Name":
+                                    gpu_names.append(gpu_name)
+                    
+                    if gpu_names:
+                        return ", ".join(gpu_names)
+            
+            # Fallback to GPUtil
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                gpu_names = []
+                for gpu in gpus:
+                    if gpu.name:
+                        gpu_names.append(gpu.name)
+                if gpu_names:
+                    return ", ".join(gpu_names)
+            
+            # Final fallback
+            return "Integrated Graphics"
+        except Exception:
+            return "N/A"
     
-    def get_comprehensive_system_info(self) -> Dict[str, any]:
-        """Get all system information in one call."""
-        return {
-            'basic_info': self.get_basic_system_info(),
-            'cpu_info': self.get_cpu_info(),
-            'memory_info': self.get_memory_info(),
-            'disk_info': self.get_disk_info(),
-            'network_info': self.get_network_info(),
-            'uptime_info': self.get_system_uptime(),
-            'timestamp': psutil.time.time()
-        }
+    def _get_os_info(self) -> str:
+        """Get operating system and version using PowerShell."""
+        try:
+            # Try PowerShell to get accurate OS information
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_OperatingSystem | Select-Object Caption, Version | ConvertTo-Csv -NoTypeInformation'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 1:
+                    # Parse CSV output: "Caption","Version"
+                    csv_line = lines[1].strip()
+                    if csv_line.startswith('"') and csv_line.endswith('"'):
+                        # Extract caption (OS name)
+                        parts = csv_line.split('","')
+                        if len(parts) >= 2:
+                            caption = parts[0].strip('"')
+                            version = parts[1].strip('"')
+                            if caption:
+                                return caption
+            
+            # Fallback to platform
+            system = platform.system()
+            version = platform.version()
+            release = platform.release()
+            
+            if system == "Windows":
+                return f"Windows {release} {version}"
+            elif system == "Linux":
+                return f"Linux {release} {version}"
+            elif system == "Darwin":
+                return f"macOS {release} {version}"
+            else:
+                return f"{system} {release} {version}"
+        except Exception:
+            return "N/A"
     
-    def _format_bytes(self, bytes_value: int) -> str:
-        """Format bytes into human-readable format."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if bytes_value < 1024.0:
-                return f"{bytes_value:.1f} {unit}"
-            bytes_value /= 1024.0
-        return f"{bytes_value:.1f} PB"
+    def _get_display_info(self) -> str:
+        """Get display resolution using screeninfo."""
+        try:
+            monitors = screeninfo.get_monitors()
+            if monitors:
+                # Get primary monitor
+                primary = monitors[0]
+                return f"{primary.width}x{primary.height}"
+            else:
+                return "N/A"
+        except Exception:
+            return "N/A"
     
-    def _format_uptime(self, seconds: float) -> str:
-        """Format uptime in human-readable format."""
-        days = int(seconds // 86400)
-        hours = int((seconds % 86400) // 3600)
-        minutes = int((seconds % 3600) // 60)
-        
-        if days > 0:
-            return f"{days}d {hours}h {minutes}m"
-        elif hours > 0:
-            return f"{hours}h {minutes}m"
-        else:
-            return f"{minutes}m"
+    def _get_touch_support(self) -> str:
+        """Check for touch screen support using PowerShell."""
+        try:
+            # Try PowerShell command first
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_TouchScreen | Measure-Object | Select-Object Count'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if output and "Count" in output:
+                    # Parse the count
+                    lines = output.split('\n')
+                    for line in lines:
+                        if 'Count' in line and line.strip() != 'Count':
+                            count = line.strip()
+                            if count.isdigit() and int(count) > 0:
+                                return "Yes"
+                    return "No"
+            
+            # Fallback to wmic
+            result = subprocess.run(
+                ['wmic', 'path', 'Win32_TouchScreen', 'get'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=True
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if output and len(output.split('\n')) > 1:
+                    return "Yes"
+                else:
+                    return "No"
+            else:
+                return "No"
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return "N/A"
     
-    def refresh_cache(self):
-        """Refresh cached system information."""
-        self._cached_info = self.get_comprehensive_system_info()
+    def _get_fingerprint_reader(self) -> str:
+        """Check for fingerprint reader in PnP devices."""
+        try:
+            # Try PowerShell command first
+            result = subprocess.run(
+                ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 
+                 'Get-WmiObject -Class Win32_PnPEntity | Where-Object {$_.Name -like "*fingerprint*"} | Measure-Object | Select-Object Count'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if output and "Count" in output:
+                    # Parse the count
+                    lines = output.split('\n')
+                    for line in lines:
+                        if 'Count' in line and line.strip() != 'Count':
+                            count = line.strip()
+                            if count.isdigit() and int(count) > 0:
+                                return "Yes"
+                    return "No"
+            
+            # Fallback to wmic
+            result = subprocess.run(
+                ['wmic', 'path', 'Win32_PnPEntity', 'get', 'name'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=True
+            )
+            if result.returncode == 0:
+                output = result.stdout.lower()
+                if "fingerprint" in output:
+                    return "Yes"
+                else:
+                    return "No"
+            else:
+                return "No"
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return "N/A"
+    
+    def _get_battery_health(self) -> str:
+        """Get battery health using psutil."""
+        try:
+            battery = psutil.sensors_battery()
+            if battery:
+                if battery.percent is not None:
+                    return f"{battery.percent:.0f}%"
+                else:
+                    return "Connected"
+            else:
+                return "N/A"
+        except Exception:
+            return "N/A"
+    
+    def refresh_info(self):
+        """Refresh system information cache."""
+        self._cached_info = self.get_system_info()
         self._last_update = psutil.time.time()
     
-    def get_cached_info(self) -> Dict[str, any]:
+    def get_cached_info(self) -> Dict[str, str]:
         """Get cached system information."""
-        if not self._cached_info or not self._last_update:
-            self.refresh_cache()
+        if not self._cached_info:
+            self.refresh_info()
         return self._cached_info
+    
+    def _simplify_brand_name(self, manufacturer: str) -> str:
+        """Simplify manufacturer names to common brand names."""
+        if not manufacturer:
+            return ""
+        
+        manufacturer_lower = manufacturer.lower()
+        
+        # Common brand mappings
+        brand_mappings = {
+            "micro-star international": "MSI",
+            "micro-star": "MSI",
+            "dell": "Dell",
+            "hewlett-packard": "HP",
+            "hp": "HP",
+            "lenovo": "Lenovo",
+            "asus": "ASUS",
+            "acer": "Acer",
+            "toshiba": "Toshiba",
+            "samsung": "Samsung",
+            "apple": "Apple",
+            "microsoft": "Microsoft",
+            "gigabyte": "Gigabyte",
+            "msi": "MSI"
+        }
+        
+        # Check for exact matches first
+        for key, value in brand_mappings.items():
+            if key in manufacturer_lower:
+                return value
+        
+        # If no match found, return the original manufacturer
+        return manufacturer
 
 
 # Global instance for easy access
